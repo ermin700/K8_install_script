@@ -15,7 +15,7 @@ Prerequisites
 Steps
 1. Clone or copy the scripts
 
-git clone https://github.com/ermin700/k8s-setup.git
+git clone https://github.com/ermin700/K8_install_script.git
 cd k8s-setup
 chmod +x k8s-master.sh k8s-worker.sh
 
