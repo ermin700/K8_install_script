@@ -1,71 +1,57 @@
-Kubernetes Cluster Setup on Ubuntu 22.04
-This repository provides automation scripts to set up a vanilla Kubernetes cluster (using kubeadm) on Ubuntu 22.04.It includes setup for both control-plane (master) nodes and worker nodes.
+Kubernetes 1.32.1 Cluster Installer for Ubuntu 22.04
+This repository contains two Bash scripts to automate the setup of a Kubernetes cluster using kubeadm on Ubuntu 22.04. The scripts handle the installation of containerd, kubeadm, kubelet, and kubectl, and configure the network with Calico CNI.
+
+Features
+Automated Setup: Installs all necessary components for a Kubernetes master and worker node.
+
+Modern Runtime: Uses containerd as the container runtime.
+
+Version Control: Installs Kubernetes version 1.32.1 and holds the packages to prevent unwanted upgrades.
+
+Calico CNI: Installs Calico to provide pod-to-pod networking.
 
 Prerequisites
-	•	Ubuntu 22.04 server(s) with internet access
-	•	At least 2 GB RAM and 2 vCPUs per node (recommended)
-	•	All nodes should have:
-	◦	Unique hostname
-	◦	Static IP or DHCP reservation
-	◦	Passwordless SSH (optional, for easier management)
-	•	Ports open (if firewall is enabled):
-	◦	Master: 6443, 2379-2380, 10250, 10259, 10257
-	◦	Workers: 10250, 30000-32767
+Two or more Ubuntu 22.04 servers or virtual machines.
 
-Steps
-1. Clone or copy the scripts
+sudo privileges on all machines.
 
-git clone https://github.com/ermin700/K8_install_script.git
-cd k8s-setup
-chmod +x k8s-master.sh k8s-worker.sh
+A stable internet connection.
 
-2. Set up the Control-plane (Master) node
-Run the following script on your master node:
+Usage
+Follow these steps in order to set up your Kubernetes cluster.
 
-./k8s-master.sh
-This will:
-	•	Update system packages
-	•	Disable swap
-	•	Configure kernel modules and sysctl
-	•	Install containerd (runtime)
-	•	Install kubeadm, kubelet, kubectl
-	•	Initialize the Kubernetes control-plane
-	•	Install the Flannel CNI plugin
-At the end, it will display a kubeadm join command, for example:
+Step 1: Set up the Master Node
+The k8s-master.sh script prepares the master node, initializes the cluster, and installs the Calico CNI.
 
-kubeadm join 192.168.1.100:6443 --token abc123 \
-    --discovery-token-ca-cert-hash sha256:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-Save this command — you will need it for the worker nodes.
+Copy the k8s-master.sh script to your master node.
 
-3. Set up the Worker node(s)
-Run the following script on each worker node:
+Open a terminal and run the script with sudo privileges:
 
-./k8s-worker.sh
-After it completes, paste in the kubeadm join ... command from the master node output.
+sudo bash k8s-master.sh
 
-4. Verify the cluster
-On the master node, run:
+The script will take a few minutes to complete. When it finishes, it will print a kubeadm join command. You must copy this command for use in the next step.
+
+Step 2: Set up the Worker Node
+The k8s-worker.sh script prepares the worker node to join the cluster.
+
+Copy the k8s-worker.sh script to your worker node(s).
+
+Edit the script and replace the PASTE_YOUR_KUBEADM_JOIN_COMMAND_HERE placeholder with the kubeadm join command you copied from the master node.
+
+Save the changes.
+
+Open a terminal and run the script with sudo privileges:
+
+sudo bash k8s-worker.sh
+
+Wait a few minutes for the script to finish. It will join the worker node to the cluster.
+
+Verification
+On your master node, you can verify that the worker node has successfully joined by running the following command:
 
 kubectl get nodes
-You should see your master and all worker nodes in the Ready state.
 
-CNI Plugin
-This setup uses Flannel for networking.If you prefer another CNI (like Calico), skip the Flannel installation in k8s-master.sh and apply the manifest for your chosen CNI.
+You should see both your master node and your new worker node listed with a STATUS of Ready.
 
-Resetting the cluster (if needed)
-If you need to reset everything and start over:
-
-sudo kubeadm reset -f
-sudo systemctl restart containerd
-sudo systemctl restart kubelet
-Remove the Kubernetes configs:
-
-rm -rf $HOME/.kube
-Then re-run the scripts.
-
-Summary
-	•	Run k8s-master.sh on the control-plane node
-	•	Run k8s-worker.sh on each worker node
-	•	Join workers using the command printed by the master
-	•	Verify with kubectl get nodes
-You now have a working Kubernetes cluster on Ubuntu 22.04 🚀
+Troubleshooting
+The initial issue you faced was due to an outdated APT repository URL for Kubernetes packages. Both scripts have been updated to use the correct repository, ensuring that the packages for version 1.32.1 are found and installed correctly.

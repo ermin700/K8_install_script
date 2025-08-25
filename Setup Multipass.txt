@@ -1,0 +1,72 @@
+Kubernetes Cluster on Multipass (Ubuntu 22.04)
+This guide explains how to create a lightweight Kubernetes cluster using Multipass VMs on Ubuntu 22.04. We will create 1 master node and 2 worker nodes.
+
+Prerequisites
+	•	Ubuntu host with Multipass installed (sudo snap install multipass)
+	•	Minimum system requirements:
+	◦	6 GB RAM (2 GB per VM)
+	◦	6 CPUs (2 per VM)
+	◦	30 GB disk (10 GB per VM)
+	•	Internet access
+
+Launch Multipass VMs
+
+# Control-plane (master)
+multipass launch 22.04 --name k8s-master --cpus 2 --mem 2G --disk 10G
+
+# Worker nodes
+multipass launch 22.04 --name k8s-worker1 --cpus 2 --mem 2G --disk 10G
+multipass launch 22.04 --name k8s-worker2 --cpus 2 --mem 2G --disk 10G
+Verify the VMs:
+
+multipass list
+
+ Access the VMs
+
+multipass shell k8s-master
+multipass shell k8s-worker1
+multipass shell k8s-worker2
+
+Set Hostnames (optional)
+Inside each VM:
+
+# Master
+sudo hostnamectl set-hostname k8s-master
+
+# Workers
+sudo hostnamectl set-hostname k8s-worker1
+sudo hostnamectl set-hostname k8s-worker2
+Restart the shell or VM for changes to take effect.
+
+Install Kubernetes
+Use your pre-built scripts:
+On Master:
+
+multipass transfer k8s-master.sh k8s-master:~
+multipass exec k8s-master -- bash ~/k8s-master.sh
+	•	At the end, the script will output a kubeadm join command for workers.
+On Worker Nodes:
+
+multipass transfer k8s-worker.sh k8s-worker1:~
+multipass transfer k8s-worker.sh k8s-worker2:~
+Run the script on each worker and paste the kubeadm join command:
+
+multipass exec k8s-worker1 -- bash ~/k8s-worker.sh
+multipass exec k8s-worker2 -- bash ~/k8s-worker.sh
+
+Verify the Cluster
+On the master node:
+
+multipass exec k8s-master -- kubectl get nodes
+	•	You should see 1 master and 2 worker nodes in Ready state. 
+
+Manage VMs
+Stop VMs
+
+multipass stop k8s-master k8s-worker1 k8s-worker2
+Delete VMs
+
+multipass delete k8s-master k8s-worker1 k8s-worker2
+multipass purge
+
+

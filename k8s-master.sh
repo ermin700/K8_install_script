@@ -1,14 +1,14 @@
 #!/bin/bash
-set -e
+# ==============================================================================
+# Kubernetes 1.32.1 Master Node Installer for Ubuntu 22.04
+# Includes containerd, kubeadm, kubelet, kubectl, and Calico CNI
+# ==============================================================================
 
-# ===============================
-# Kubernetes Master Setup Script
-# Compatible with Ubuntu 22.04 / 24.04
-# Installs Kubernetes v1.32.x using binaries
-# ===============================
+set -euo pipefail
 
-K8S_VERSION="v1.32.8"
-CNI_POD_NETWORK="10.244.0.0/16"
+# Configuration
+K8S_VERSION="1.32.1"
+CNI_POD_NETWORK="192.168.0.0/16"
 
 echo "[Step 1] Update system"
 sudo apt-get update -y
@@ -35,63 +35,57 @@ EOF
 sudo sysctl --system
 
 echo "[Step 5] Install containerd"
-sudo apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
 sudo apt-get install -y containerd
 
-# Configure containerd for systemd cgroup
+echo "[Step 6] Configure containerd for systemd cgroups"
 sudo mkdir -p /etc/containerd
-containerd config default | sudo tee /etc/containerd/config.toml
+sudo containerd config default | sudo tee /etc/containerd/config.toml
 sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
 sudo systemctl restart containerd
 sudo systemctl enable containerd
 
-echo "[Step 6] Download Kubernetes binaries"
-cd /tmp
-curl -LO https://dl.k8s.io/release/${K8S_VERSION}/bin/linux/amd64/kubectl
-curl -LO https://dl.k8s.io/release/${K8S_VERSION}/bin/linux/amd64/kubeadm
-curl -LO https://dl.k8s.io/release/${K8S_VERSION}/bin/linux/amd64/kubelet
+echo "[Step 7] Add Kubernetes APT repository"
+# The previous repository is outdated. The correct one is now maintained
+# with an official key and a different URL.
+sudo apt-get install -y apt-transport-https ca-certificates curl gnupg
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v${K8S_VERSION:0:4}/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v${K8S_VERSION:0:4}/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
 
-sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-sudo install -o root -g root -m 0755 kubeadm /usr/local/bin/kubeadm
-sudo install -o root -g root -m 0755 kubelet /usr/local/bin/kubelet
+echo "[Step 8] Install kubelet, kubeadm, kubectl"
+sudo apt-get update -y
+sudo apt-get install -y kubelet kubeadm kubectl
+sudo apt-mark hold kubelet kubeadm kubectl
 
-echo "[Step 7] Create kubelet systemd service"
-cat <<EOF | sudo tee /etc/systemd/system/kubelet.service
-[Unit]
-Description=kubelet: The Kubernetes Node Agent
-Documentation=https://kubernetes.io/docs/
-After=network.target
-
+echo "[Step 9] Configure kubelet to use systemd cgroup with containerd"
+sudo mkdir -p /etc/systemd/system/kubelet.service.d
+cat <<EOF | sudo tee /etc/systemd/system/kubelet.service.d/20-containerd.conf
 [Service]
-ExecStart=/usr/local/bin/kubelet
-Restart=always
-StartLimitInterval=0
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
+Environment="KUBELET_EXTRA_ARGS=--cgroup-driver=systemd --container-runtime=remote --container-runtime-endpoint=unix:///run/containerd/containerd.sock"
 EOF
-
 sudo systemctl daemon-reload
-sudo systemctl enable kubelet
+sudo systemctl restart kubelet
 
-echo "[Step 8] Stop kubelet to avoid port conflicts"
-sudo systemctl stop kubelet || true
-
-echo "[Step 9] Initialize Kubernetes master node"
-sudo kubeadm reset -f || true
-sudo kubeadm init --pod-network-cidr=${CNI_POD_NETWORK} | tee kubeadm-init.out
-
-echo "[Step 10] Start kubelet service"
-sudo systemctl start kubelet
+echo "[Step 10] Initialize Kubernetes master node"
+sudo kubeadm init --pod-network-cidr=${CNI_POD_NETWORK} --kubernetes-version="v${K8S_VERSION}" | tee kubeadm-init.out
 
 echo "[Step 11] Configure kubectl for current user"
-mkdir -p $HOME/.kube
-sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
-sudo chown $(id -u):$(id -g) $HOME/.kube/config
+mkdir -p "$HOME/.kube"
+sudo cp -i /etc/kubernetes/admin.conf "$HOME/.kube/config"
+sudo chown "$USER:$USER" "$HOME/.kube/config"
 
-echo "[Step 12] Install Flannel CNI"
-kubectl apply -f https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml
+echo "[Step 12] Wait for control-plane pods to be ready"
+for i in {1..40}; do
+  if kubectl get pods -n kube-system 2>/dev/null | grep -E 'kube-apiserver|kube-controller-manager|kube-scheduler' | grep -vq 'Running'; then
+    echo "Waiting for control-plane pods... ($i/40)"
+    sleep 6
+  else
+    echo "Control-plane pods are running!"
+    break
+  fi
+done
+
+echo "[Step 13] Install Calico CNI"
+kubectl apply -f https://projectcalico.docs.tigera.io/manifests/calico.yaml
 
 echo "======================================================"
 echo "Master node setup complete!"
