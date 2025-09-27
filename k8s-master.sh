@@ -1,15 +1,32 @@
 #!/bin/bash
 # ==============================================================================
-# Kubernetes 1.32.1 Master Node Installer for Ubuntu 22.04
-# Includes containerd, kubeadm, kubelet, kubectl, and Calico CNI
+# Kubernetes 1.32.1 Worker Node Installer for Ubuntu 22.04
+# Includes containerd, kubeadm, kubelet, kubectl
+# Handles partial installs and safely joins master
 # ==============================================================================
 
 set -euo pipefail
 
-# Configuration
+# ---------------- Configuration ----------------
 K8S_VERSION="1.32.1"
-CNI_POD_NETWORK="192.168.0.0/16"
 
+# --- IMPORTANT ---
+# Paste the 'kubeadm join' command from your master node below
+KUBEADM_JOIN_COMMAND="kubeadm join 10.0.0.10:6443 --token <token> --discovery-token-ca-cert-hash sha256:<hash>"
+
+if [ -z "$KUBEADM_JOIN_COMMAND" ]; then
+    echo "Error: Please set the KUBEADM_JOIN_COMMAND variable with your master node join command."
+    exit 1
+fi
+
+# ---------------- Cleanup any leftovers ----------------
+echo "[Step 0] Reset any previous Kubernetes installation"
+sudo kubeadm reset -f || true
+sudo systemctl stop kubelet || true
+sudo systemctl disable kubelet || true
+sudo rm -rf /etc/kubernetes/manifests/* $HOME/.kube
+
+# ---------------- System Preparation ----------------
 echo "[Step 1] Update system"
 sudo apt-get update -y
 sudo apt-get upgrade -y
@@ -34,6 +51,7 @@ net.ipv4.ip_forward                 = 1
 EOF
 sudo sysctl --system
 
+# ---------------- Install containerd ----------------
 echo "[Step 5] Install containerd"
 sudo apt-get install -y containerd
 
@@ -44,51 +62,34 @@ sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/conf
 sudo systemctl restart containerd
 sudo systemctl enable containerd
 
+# ---------------- Add Kubernetes repo ----------------
 echo "[Step 7] Add Kubernetes APT repository"
-# The previous repository is outdated. The correct one is now maintained
-# with an official key and a different URL.
 sudo apt-get install -y apt-transport-https ca-certificates curl gnupg
-curl -fsSL https://pkgs.k8s.io/core:/stable:/v${K8S_VERSION:0:4}/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v${K8S_VERSION:0:4}/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.32/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-archive-keyring.gpg
+echo "deb [signed-by=/etc/apt/keyrings/kubernetes-archive-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.32/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
 
+# ---------------- Install Kubernetes components ----------------
 echo "[Step 8] Install kubelet, kubeadm, kubectl"
 sudo apt-get update -y
-sudo apt-get install -y kubelet kubeadm kubectl
+sudo apt-get install -y kubelet="${K8S_VERSION}" kubeadm="${K8S_VERSION}" kubectl="${K8S_VERSION}"
 sudo apt-mark hold kubelet kubeadm kubectl
 
-echo "[Step 9] Configure kubelet to use systemd cgroup with containerd"
+# ---------------- Configure kubelet ----------------
+echo "[Step 9] Configure kubelet for systemd cgroups with containerd"
 sudo mkdir -p /etc/systemd/system/kubelet.service.d
 cat <<EOF | sudo tee /etc/systemd/system/kubelet.service.d/20-containerd.conf
 [Service]
 Environment="KUBELET_EXTRA_ARGS=--cgroup-driver=systemd --container-runtime=remote --container-runtime-endpoint=unix:///run/containerd/containerd.sock"
 EOF
 sudo systemctl daemon-reload
-sudo systemctl restart kubelet
+sudo systemctl enable --now kubelet
 
-echo "[Step 10] Initialize Kubernetes master node"
-sudo kubeadm init --pod-network-cidr=${CNI_POD_NETWORK} --kubernetes-version="v${K8S_VERSION}" | tee kubeadm-init.out
-
-echo "[Step 11] Configure kubectl for current user"
-mkdir -p "$HOME/.kube"
-sudo cp -i /etc/kubernetes/admin.conf "$HOME/.kube/config"
-sudo chown "$USER:$USER" "$HOME/.kube/config"
-
-echo "[Step 12] Wait for control-plane pods to be ready"
-for i in {1..40}; do
-  if kubectl get pods -n kube-system 2>/dev/null | grep -E 'kube-apiserver|kube-controller-manager|kube-scheduler' | grep -vq 'Running'; then
-    echo "Waiting for control-plane pods... ($i/40)"
-    sleep 6
-  else
-    echo "Control-plane pods are running!"
-    break
-  fi
-done
-
-echo "[Step 13] Install Calico CNI"
-kubectl apply -f https://projectcalico.docs.tigera.io/manifests/calico.yaml
+# ---------------- Join cluster ----------------
+echo "[Step 10] Join the Kubernetes cluster"
+sudo $KUBEADM_JOIN_COMMAND
 
 echo "======================================================"
-echo "Master node setup complete!"
-echo "Use the following join command on worker nodes:"
-grep "kubeadm join" kubeadm-init.out
+echo "Worker node setup complete!"
+echo "Check node status from master: kubectl get nodes"
 echo "======================================================"
