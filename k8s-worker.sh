@@ -1,14 +1,15 @@
 #!/bin/bash
 # ==============================================================================
-# Kubernetes 1.32.1 Worker Node Installer for Ubuntu 22.04
+# Kubernetes 1.32 Worker Node Installer for Ubuntu 22.04
 # Includes containerd, kubeadm, kubelet, kubectl
 # Handles partial installs and safely joins master
+# Automatically installs the latest patch release of 1.32.x
 # ==============================================================================
 
 set -euo pipefail
 
 # ---------------- Configuration ----------------
-K8S_VERSION="1.32.1"
+K8S_MAJOR_MINOR="1.32"
 
 # --- IMPORTANT ---
 # Paste the 'kubeadm join' command from your master node below
@@ -66,17 +67,32 @@ sudo systemctl enable containerd
 echo "[Step 7] Add Kubernetes APT repository"
 sudo apt-get install -y apt-transport-https ca-certificates curl gnupg
 sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.32/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-archive-keyring.gpg
-echo "deb [signed-by=/etc/apt/keyrings/kubernetes-archive-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.32/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v${K8S_MAJOR_MINOR}/deb/Release.key | \
+  sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-archive-keyring.gpg
+
+echo "deb [signed-by=/etc/apt/keyrings/kubernetes-archive-keyring.gpg] \
+https://pkgs.k8s.io/core:/stable:/v${K8S_MAJOR_MINOR}/deb/ /" | \
+  sudo tee /etc/apt/sources.list.d/kubernetes.list
+
+# ---------------- Detect latest patch version ----------------
+echo "[Step 8] Detecting latest Kubernetes ${K8S_MAJOR_MINOR} version..."
+sudo apt-get update -y
+LATEST_VERSION=$(apt-cache madison kubeadm | awk '{print $3}' | grep "^${K8S_MAJOR_MINOR}" | sort -V | tail -1)
+
+if [ -z "$LATEST_VERSION" ]; then
+    echo "Error: Could not detect latest Kubernetes ${K8S_MAJOR_MINOR} version from repo"
+    exit 1
+fi
+
+echo "Latest Kubernetes version detected: $LATEST_VERSION"
 
 # ---------------- Install Kubernetes components ----------------
-echo "[Step 8] Install kubelet, kubeadm, kubectl"
-sudo apt-get update -y
-sudo apt-get install -y kubelet="${K8S_VERSION}-00" kubeadm="${K8S_VERSION}-00" kubectl="${K8S_VERSION}-00"
+echo "[Step 9] Install kubelet, kubeadm, kubectl"
+sudo apt-get install -y kubelet="${LATEST_VERSION}" kubeadm="${LATEST_VERSION}" kubectl="${LATEST_VERSION}"
 sudo apt-mark hold kubelet kubeadm kubectl
 
 # ---------------- Configure kubelet ----------------
-echo "[Step 9] Configure kubelet for systemd cgroups with containerd"
+echo "[Step 10] Configure kubelet for systemd cgroups with containerd"
 sudo mkdir -p /etc/systemd/system/kubelet.service.d
 cat <<EOF | sudo tee /etc/systemd/system/kubelet.service.d/20-containerd.conf
 [Service]
@@ -86,7 +102,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now kubelet
 
 # ---------------- Join cluster ----------------
-echo "[Step 10] Join the Kubernetes cluster"
+echo "[Step 11] Join the Kubernetes cluster"
 sudo $KUBEADM_JOIN_COMMAND
 
 echo "======================================================"
