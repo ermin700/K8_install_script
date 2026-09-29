@@ -1,57 +1,79 @@
-Kubernetes 1.32.1 Cluster Installer for Ubuntu 22.04
-This repository contains two Bash scripts to automate the setup of a Kubernetes cluster using kubeadm on Ubuntu 22.04. The scripts handle the installation of containerd, kubeadm, kubelet, and kubectl, and configure the network with Calico CNI.
+# Kubernetes Cluster Installer for Ubuntu 22.04 / 24.04
 
-Features
-Automated Setup: Installs all necessary components for a Kubernetes master and worker node.
+This repository contains two Bash scripts to automate the setup of a Kubernetes cluster using `kubeadm`. `k8s-master.sh` sets up the single control-plane node; `k8s-worker.sh` is run on however many worker nodes you want and joins each one to that control plane.
 
-Modern Runtime: Uses containerd as the container runtime.
+## Features
 
-Version Control: Installs Kubernetes version 1.32.1 and holds the packages to prevent unwanted upgrades.
+- **Automated setup** of containerd, kubeadm, kubelet, kubectl and Calico CNI.
+- **Modern runtime**: containerd with the systemd cgroup driver.
+- **Auto-detected patch version**: both scripts install the latest patch release of a configurable major.minor track (`K8S_MINOR`, default `1.32`) instead of a hardcoded version, so the control plane and workers always end up on matching, currently-available packages.
+- **Idempotent-ish re-runs**: re-running `k8s-master.sh` on an already-initialized node skips `kubeadm init` instead of failing; `k8s-worker.sh` resets any previous join before trying again.
+- **Preflight checks**: worker script verifies it can actually reach the control plane's API port before spending minutes installing packages, and rejects an unedited join-command placeholder with a clear error instead of a cryptic TLS failure.
+- **Logging**: every run appends to `/var/log/k8s-master-install.log` or `/var/log/k8s-worker-install.log`.
 
-Calico CNI: Installs Calico to provide pod-to-pod networking.
+## Prerequisites
 
-Prerequisites
-Two or more Ubuntu 22.04 servers or virtual machines.
+- Two or more Ubuntu 22.04/24.04 servers or VMs.
+- `sudo` privileges on all machines.
+- A stable internet connection.
+- If these are real servers/cloud VMs (not local VMs on the same host-only network), make sure your firewall/security group allows at minimum:
+  - **Control plane**: TCP 6443 (API server) from workers and your workstation; TCP 2379-2380, 10250-10259 between cluster nodes only.
+  - **Workers**: TCP 10250 from the control plane; TCP 30000-32767 if you expose NodePort services.
 
-sudo privileges on all machines.
+## Usage
 
-A stable internet connection.
+### Step 1: Set up the control-plane node
 
-Usage
-Follow these steps in order to set up your Kubernetes cluster.
+Copy `k8s-master.sh` to the node and run it:
 
-Step 1: Set up the Master Node
-The k8s-master.sh script prepares the master node, initializes the cluster, and installs the Calico CNI.
-
-Copy the k8s-master.sh script to your master node.
-
-Open a terminal and run the script with sudo privileges:
-
+```bash
 sudo bash k8s-master.sh
+```
 
-The script will take a few minutes to complete. When it finishes, it will print a kubeadm join command. You must copy this command for use in the next step.
+Optional overrides via environment variables:
 
-Step 2: Set up the Worker Node
-The k8s-worker.sh script prepares the worker node to join the cluster.
+```bash
+K8S_MINOR=1.31 POD_CIDR=10.244.0.0/16 CALICO_VERSION=v3.28.2 sudo -E bash k8s-master.sh
+```
 
-Copy the k8s-worker.sh script to your worker node(s).
+When it finishes it prints (and saves to `join-command.sh` next to the script) the `kubeadm join` command you'll need for Step 2.
 
-Edit the script and replace the PASTE_YOUR_KUBEADM_JOIN_COMMAND_HERE placeholder with the kubeadm join command you copied from the master node.
+### Step 2: Set up each worker node
 
-Save the changes.
+Copy `k8s-worker.sh` to the worker. Open it and replace the placeholder:
 
-Open a terminal and run the script with sudo privileges:
+```bash
+KUBEADM_JOIN_COMMAND="PASTE_YOUR_KUBEADM_JOIN_COMMAND_HERE"
+```
 
+with the full command from `join-command.sh` on the master, e.g.:
+
+```bash
+KUBEADM_JOIN_COMMAND="kubeadm join 10.0.0.10:6443 --token abcdef.0123456789abcdef --discovery-token-ca-cert-hash sha256:deadbeef..."
+```
+
+Save the file, then run:
+
+```bash
 sudo bash k8s-worker.sh
+```
 
-Wait a few minutes for the script to finish. It will join the worker node to the cluster.
+If `K8S_MINOR` was overridden on the master, set the same value here so both sides install matching versions.
 
-Verification
-On your master node, you can verify that the worker node has successfully joined by running the following command:
+### Verification
 
+From the control-plane node:
+
+```bash
 kubectl get nodes
+```
 
-You should see both your master node and your new worker node listed with a STATUS of Ready.
+You should see the master and each worker listed with `STATUS Ready` (Calico needs a minute or two after a worker joins before it reports Ready).
 
-Troubleshooting
-The initial issue you faced was due to an outdated APT repository URL for Kubernetes packages. Both scripts have been updated to use the correct repository, ensuring that the packages for version 1.32.1 are found and installed correctly.
+## Troubleshooting
+
+- **Forgot to edit the join command**: the worker script now checks for the placeholder text and any leftover `<token>`/`<hash>` markers and exits with a clear message instead of silently running a broken command.
+- **Worker can't reach the master**: the script resolves the host:port from the join command and does a TCP connectivity check before installing anything. If that fails, check firewall/security group rules and that the address is actually reachable from the worker.
+- **Node stuck `NotReady`**: usually Calico hasn't finished rolling out yet. Check with `kubectl -n kube-system get pods -l k8s-app=calico-node`.
+- **Re-running after a failure**: `k8s-master.sh` detects an existing `/etc/kubernetes/admin.conf` and skips `kubeadm init`; `k8s-worker.sh` always runs `kubeadm reset` first, so it's safe to re-run either script.
+- **Version mismatches**: both scripts install the latest patch of the same `K8S_MINOR` track by default, so they should always agree. If you pin different `K8S_MINOR` values on master vs. workers you may hit skew issues — keep them in sync.
