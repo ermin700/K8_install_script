@@ -1,5 +1,5 @@
-Kubernetes Cluster on Multipass (Ubuntu 22.04)
-This guide explains how to create a lightweight Kubernetes cluster using Multipass VMs on Ubuntu 22.04. We will create 1 master node and 2 worker nodes.
+Kubernetes Cluster on Multipass (Ubuntu 24.04)
+This guide explains how to create a lightweight Kubernetes cluster using Multipass VMs on Ubuntu 24.04. We will create 1 master node and 2 worker nodes.
 
 Prerequisites
 	•	Ubuntu host with Multipass installed (sudo snap install multipass)
@@ -12,11 +12,11 @@ Prerequisites
 Launch Multipass VMs
 
 # Control-plane (master)
-multipass launch 22.04 --name k8s-master --cpus 2 --mem 2G --disk 10G
+multipass launch 24.04 --name k8s-master --cpus 2 --mem 2G --disk 10G
 
 # Worker nodes
-multipass launch 22.04 --name k8s-worker1 --cpus 2 --mem 2G --disk 10G
-multipass launch 22.04 --name k8s-worker2 --cpus 2 --mem 2G --disk 10G
+multipass launch 24.04 --name k8s-worker1 --cpus 2 --mem 2G --disk 10G
+multipass launch 24.04 --name k8s-worker2 --cpus 2 --mem 2G --disk 10G
 Verify the VMs:
 
 multipass list
