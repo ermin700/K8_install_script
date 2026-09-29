@@ -9,7 +9,7 @@
 set -euo pipefail
 
 # ---------------- Configuration (override via env vars) ----------------
-K8S_MINOR="${K8S_MINOR:-1.32}"
+K8S_MINOR="${K8S_MINOR:-1.37}"   # major.minor track to install (latest stable as of writing) -- must match the master
 LOG_FILE="/var/log/k8s-worker-install.log"
 
 # --- IMPORTANT ---

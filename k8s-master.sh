@@ -7,9 +7,9 @@
 set -euo pipefail
 
 # ---------------- Configuration (override via env vars) ----------------
-K8S_MINOR="${K8S_MINOR:-1.32}"                # major.minor track to install, e.g. 1.32
+K8S_MINOR="${K8S_MINOR:-1.37}"                # major.minor track to install, e.g. 1.37 (latest stable as of writing)
 POD_CIDR="${POD_CIDR:-192.168.0.0/16}"        # must match the CNI's expected range
-CALICO_VERSION="${CALICO_VERSION:-v3.29.1}"   # pinned Calico release
+CALICO_VERSION="${CALICO_VERSION:-v3.32.2}"   # pinned Calico release
 LOG_FILE="/var/log/k8s-master-install.log"
 
 log()  { echo "[$(date '+%H:%M:%S')] $*" | sudo tee -a "$LOG_FILE" >/dev/null; echo "$*"; }
